@@ -46,7 +46,7 @@ int main(int argc, char const *argv[]) {
 
   // Variable declaration.
   int i;
-  pilot_args *pilot_thread_args;
+  pilot_args pilot_thread_args[NUM_PILOT_THREADS];
   pthread_t pilot_thread_ids[NUM_PILOT_THREADS];
 
   // Initialize random number generator.
@@ -54,11 +54,6 @@ int main(int argc, char const *argv[]) {
 
   // Initialize semaphores.
   sem_init(&sem_starfighters, 0, INITIAL_NUM_STARFIGHTERS);
-
-  // Allocate thread arguments:
-  pilot_thread_args = (pilot_args*) malloc(
-    NUM_PILOT_THREADS * sizeof(pilot_args)
-  );
 
   // Create pilot threads.
   for(i = 0; i < NUM_PILOT_THREADS; i++) {
@@ -92,9 +87,6 @@ int main(int argc, char const *argv[]) {
       printf("The war was LOST! All pilots were killed!\n");
   pthread_mutex_unlock(&mutex_enemy_starfighters);
   pthread_mutex_unlock(&mutex_pilots);
-
-  // Free all dynamic resource allocations.
-  free(pilot_thread_args);
 
   // Finish execution.
   return 0;
