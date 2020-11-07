@@ -101,14 +101,14 @@ const char last_names[LAST_NAME_ARRAY_SIZE][NAME_SIZE] = {
 
 // Function implementations:
 void generate_name(char *destination) {
-  char name_generated[FULL_NAME_SIZE], space[2]=" \0", terminator='\0';
+  char name_generated[FULL_NAME_SIZE], space[2]=" \0";
 
   strcpy((char *) &name_generated, first_names[rand() % FIRST_NAME_ARRAY_SIZE]);
   strcat((char *) &name_generated, (char *) &space);
   strcat((char *) &name_generated, middle_names[rand() % MIDDLE_NAME_ARRAY_SIZE]);
   strcat((char *) &name_generated, (char *) &space);
   strcat((char *) &name_generated, last_names[rand() % LAST_NAME_ARRAY_SIZE]);
-  strcat((char *) &name_generated, &terminator);
+  name_generated[FULL_NAME_SIZE - 1] = '\0';
 
   strcpy(destination, (char *) &name_generated);
 }

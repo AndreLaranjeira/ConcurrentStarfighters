@@ -1,8 +1,8 @@
 // Concurrent starfighters - Name generator module - Header file.
 
 // Define guard:
-#ifndef CONCURRENT_STARFIGHTERS_NAMES_H_
-#define CONCURRENT_STARFIGHTERS_NAMES_H_
+#ifndef CONCURRENT_STARFIGHTERS_NAME_GENERATOR_H_
+#define CONCURRENT_STARFIGHTERS_NAME_GENERATOR_H_
 
 // Includes:
 #include <stdio.h>
@@ -19,4 +19,4 @@
 // Function headers:
 void generate_name(char*);
 
-#endif // CONCURRENT_STARFIGHTERS_NAMES_H_
+#endif // CONCURRENT_STARFIGHTERS_NAME_GENERATOR_H_

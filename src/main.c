@@ -12,7 +12,6 @@
 #include "name_generator.h"
 
 // Macros:
-#define DEBUG_LEVEL 0
 #define INITIAL_NUM_STARFIGHTERS 10
 #define MAX_ENEMIES_DESTROYED_PER_RUN 4
 #define NUM_ENEMY_STARFIGHTERS 100
@@ -31,13 +30,26 @@ typedef struct {
 } pilot_args;
 
 // Global variables:
+pthread_mutex_t mutex_allied_starfighters = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_enemy_starfighters = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_pilots = PTHREAD_MUTEX_INITIALIZER;
-sem_t sem_starfighters;
+sem_t sem_end_condition;
+sem_t sem_lose_condition;
+sem_t sem_starfighters_ready_to_fly;
+sem_t sem_win_condition;
+unsigned int num_allied_starfighters = INITIAL_NUM_STARFIGHTERS;
 unsigned int num_enemy_starfighters = NUM_ENEMY_STARFIGHTERS;
 unsigned int num_pilots = NUM_PILOT_THREADS;
 
 // Function headers:
+boolean check_event_outcome_with_probability(double);
+unsigned int roll_dice_with_N_sides(unsigned int);
+void bury_pilot(pilot_args*);
+void check_end_condition(void);
+void decrease_enemy_starfighters(unsigned int);
+void fight_against_enemies(pilot_args*);
+void land_starfighter(pilot_args*);
+void take_off_on_starfigther(pilot_args*);
 void* engineer(void*);
 void* pilot(void*);
 
@@ -53,7 +65,10 @@ int main(int argc, char const *argv[]) {
   srand((unsigned int) time(NULL));
 
   // Initialize semaphores.
-  sem_init(&sem_starfighters, 0, INITIAL_NUM_STARFIGHTERS);
+  sem_init(&sem_starfighters_ready_to_fly, 0, INITIAL_NUM_STARFIGHTERS);
+  sem_init(&sem_end_condition, 0, 0);
+  sem_init(&sem_lose_condition, 0, 0);
+  sem_init(&sem_win_condition, 0, 0);
 
   // Create pilot threads.
   for(i = 0; i < NUM_PILOT_THREADS; i++) {
@@ -70,23 +85,20 @@ int main(int argc, char const *argv[]) {
 
   }
 
-  // Join all threads.
-  for(i = 0; i < NUM_PILOT_THREADS; i++) {
-    pthread_join(pilot_thread_ids[i], NULL);
-  }
+  // Wait for the war to end.
+  sem_wait(&sem_end_condition);
 
   // Check to see if the war was won.
-  pthread_mutex_lock(&mutex_pilots);
-  pthread_mutex_lock(&mutex_enemy_starfighters);
-    if(num_enemy_starfighters == 0)
+  if(sem_trywait(&sem_win_condition) == 0) {
+    pthread_mutex_lock(&mutex_pilots);
       printf(
-        "The war was WON! There were %u pilots who survived.\n",
-        num_pilots
+        "The war was WON! There were %u pilots who survived.\n", num_pilots
       );
-    else
-      printf("The war was LOST! All pilots were killed!\n");
-  pthread_mutex_unlock(&mutex_enemy_starfighters);
-  pthread_mutex_unlock(&mutex_pilots);
+    pthread_mutex_unlock(&mutex_pilots);
+  }
+
+  else if(sem_trywait(&sem_lose_condition) == 0)
+    printf("The war was LOST!\n");
 
   // Finish execution.
   return 0;
@@ -94,6 +106,123 @@ int main(int argc, char const *argv[]) {
 }
 
 // Function implementations:
+boolean check_event_outcome_with_probability(double event_probability) {
+  if(roll_dice_with_N_sides(100) > (event_probability * 100))
+    return FALSE;
+  else
+    return TRUE;
+}
+
+unsigned int roll_dice_with_N_sides(unsigned int sides) {
+  if(sides == 0)
+    return 0;
+  else
+    return (rand() % sides) + 1;
+}
+
+void bury_pilot(pilot_args *pilot_info) {
+
+  // Bury the pilot.
+  pthread_mutex_lock(&mutex_pilots);
+    num_pilots -= 1;
+  pthread_mutex_unlock(&mutex_pilots);
+
+  // Account for the destroyed starfighter.
+  pthread_mutex_lock(&mutex_allied_starfighters);
+    num_allied_starfighters -= 1;
+  pthread_mutex_unlock(&mutex_allied_starfighters);
+
+  // Check to see if the war ended.
+  check_end_condition();
+
+  printf("Pilot %s (#%u) died in battle!\n", pilot_info->name, pilot_info->id);
+
+}
+
+void check_end_condition(void) {
+
+  // Variable declaration.
+  boolean lose_condition = FALSE, win_condition = FALSE;
+
+  // Pilots win when the number of enemy starfighters reaches 0.
+  pthread_mutex_lock(&mutex_enemy_starfighters);
+    if(num_enemy_starfighters == 0) {
+      win_condition = TRUE;
+      sem_post(&sem_win_condition);
+    }
+  pthread_mutex_unlock(&mutex_enemy_starfighters);
+
+  // Enemies win when the number of pilots or allied starfighters reaches 0.
+  pthread_mutex_lock(&mutex_pilots);
+  pthread_mutex_lock(&mutex_allied_starfighters);
+    if((num_pilots == 0 || num_allied_starfighters == 0) && !win_condition) {
+      lose_condition = TRUE;
+      sem_post(&sem_lose_condition);
+    }
+  pthread_mutex_unlock(&mutex_allied_starfighters);
+  pthread_mutex_unlock(&mutex_pilots);
+
+  // Signal end condition.
+  if(lose_condition || win_condition)
+    sem_post(&sem_end_condition);
+
+}
+
+void decrease_enemy_starfighters(unsigned int num_enemies_destroyed) {
+  pthread_mutex_lock(&mutex_enemy_starfighters);
+    if(num_enemies_destroyed > num_enemy_starfighters)
+      num_enemy_starfighters = 0;
+    else
+      num_enemy_starfighters -= num_enemies_destroyed;
+  pthread_mutex_unlock(&mutex_enemy_starfighters);
+}
+
+void fight_against_enemies(pilot_args *pilot_info) {
+
+  // Variable declaration.
+  unsigned int num_enemies_destroyed;
+
+  // Fighting against enemies takes time.
+  sleep(roll_dice_with_N_sides(12) + 2);
+
+  // The pilot destroys a number of enemy starfighters when fighting.
+  num_enemies_destroyed = roll_dice_with_N_sides(MAX_ENEMIES_DESTROYED_PER_RUN);
+  decrease_enemy_starfighters(num_enemies_destroyed);
+
+  printf(
+    "Pilot %s (#%u) destroyed %u enemies!\n",
+    pilot_info->name, pilot_info->id, num_enemies_destroyed
+  );
+
+}
+
+void land_starfighter(pilot_args *pilot_info) {
+
+  printf(
+    "Pilot %s (#%u) returned from battle!\n", pilot_info->name, pilot_info->id
+  );
+
+  // Check to see if the war ended.
+  check_end_condition();
+
+  // Return the starfighter.
+  sem_post(&sem_starfighters_ready_to_fly);
+
+}
+
+void take_off_on_starfigther(pilot_args *pilot_info) {
+
+  // Acquire starfighter.
+  sem_wait(&sem_starfighters_ready_to_fly);
+
+  printf(
+    "Pilot %s (#%u) took off on a starfighter!\n",
+    pilot_info->name, pilot_info->id
+  );
+  
+}
+
+
 void * engineer(void *args) {
 
   // Placeholder.
@@ -106,9 +235,8 @@ void * engineer(void *args) {
 void * pilot(void *args) {
 
   // Variable declaration.
-  boolean still_alive, end_condition = FALSE;
+  boolean pilot_died_on_this_run;
   pilot_args pilot_information;
-  unsigned int enemies_destroyed;
 
   pilot_information.id = ((pilot_args*) args)->id;
   strcpy(
@@ -118,71 +246,26 @@ void * pilot(void *args) {
 
   printf("Pilot #%u: %s\n", pilot_information.id, pilot_information.name);
 
+  // Main thread loop.
   while(TRUE) {
 
     // Desync threads.
-    sleep((rand() % 10) + 5);
+    sleep(roll_dice_with_N_sides(10) + 4);
 
-    // Check end condition (pilots win when the number of enemies reaches 0).
-    pthread_mutex_lock(&mutex_enemy_starfighters);
-      if(num_enemy_starfighters == 0)
-        end_condition = TRUE;
-    pthread_mutex_unlock(&mutex_enemy_starfighters);
-
-    // If war ended, the fight ends here.
-    if(end_condition)
-      pthread_exit(0);
-
-    // Else, the pilot gets back to the fight by acquiring a starfighter.
-    sem_wait(&sem_starfighters);
-
-    printf(
-      "Pilot %s (#%u) took off on a starship!\n",
-      pilot_information.name, pilot_information.id
-    );
-
-    // War wait time.
-    sleep((rand() % 12) + 3);
-
-    // Chalk up how many enemies the pilot destroyed.
-    enemies_destroyed = (rand() % MAX_ENEMIES_DESTROYED_PER_RUN) + 1;
-
-    pthread_mutex_lock(&mutex_enemy_starfighters);
-      if(enemies_destroyed > num_enemy_starfighters)
-        num_enemy_starfighters = 0;
-      else
-        num_enemy_starfighters -= enemies_destroyed;
-    pthread_mutex_unlock(&mutex_enemy_starfighters);
+    take_off_on_starfigther(&pilot_information);
+    fight_against_enemies(&pilot_information);
 
     // Check if the pilot made it out alive.
-    still_alive = rand() % 100 >= PILOT_DEATH_PROBABILITY * 100 ? TRUE : FALSE;
+    pilot_died_on_this_run = \
+      check_event_outcome_with_probability(PILOT_DEATH_PROBABILITY);
 
-    if(!still_alive) {
-      // Update the number of pilots.
-      pthread_mutex_lock(&mutex_pilots);
-        if(num_pilots > 0)
-          num_pilots -= 1;
-      pthread_mutex_unlock(&mutex_pilots);
-
-      // Bid farewell to the pilot and his(her) ship.
-      printf(
-        "Pilot %s (#%u) died in battle!\n",
-        pilot_information.name, pilot_information.id
-      );
-
+    if(pilot_died_on_this_run) {
+      bury_pilot(&pilot_information);
       pthread_exit((void*) 1);
     }
 
-    else {
-      // Hail the returning pilot.
-      printf(
-        "Pilot %s (#%u) returned from battle after destorying %u enemies!\n",
-        pilot_information.name, pilot_information.id, enemies_destroyed
-      );
-
-      // Return the starfighter.
-      sem_post(&sem_starfighters);
-    }
+    else
+      land_starfighter(&pilot_information);
 
   }
 
