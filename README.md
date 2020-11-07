@@ -1,7 +1,7 @@
 # Concurrent Starfighters
 
 ## Descrição
-Programa escrito na linguagem C com a biblioteca PThreads para simular um hangar de espaçonaves em funcionamento. As threads de pilotos rotineiramente utilizam as espaçonaves no hangar para se defender de ataques inimigos, podendo retornar vivas ou não de uma batalha. As threads de mecânicos constroem mais espaçonaves caso o número de espaçonaves fique abaixo de um limite. As threads de líderes criam novas threads de pilotos a não ser que o número de pilotos esteja acima de um limite. Trabalho final da disciplina de Programação concorrente 2020/1 da Universidade de Brasília.
+Programa escrito na linguagem C com a biblioteca _PThreads_ para simular um hangar de espaçonaves em funcionamento. As threads de pilotos rotineiramente utilizam as espaçonaves no hangar para se defenderem de ataques inimigos, podendo retornar vivas ou não de uma batalha. As threads de mecânicos fazem manutenção nas espaçonaves após elas retornarem do combate. As threads de psiquiatras fazem acompanhamentos com os pilotos após eles retornarem das batalhas. Trabalho final da disciplina de Programação concorrente 2020/1 da Universidade de Brasília.
 
 ## Integrantes
 

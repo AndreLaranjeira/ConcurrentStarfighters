@@ -13,13 +13,13 @@ ODIR = src/obj
 SDIR = src
 
 # Project dependency files (header files):
-_DEPS =
+_DEPS = name_generator.h
 
 # Project object files:
-_OBJ = main.o
+_OBJ = main.o name_generator.o
 
 # Project source files:
-_SRC = main.c
+_SRC = main.c name_generator.c
 
 # Joining file names with their respective paths:
 DEPS = $(patsubst %,$(IDIR)/%,$(_DEPS))
