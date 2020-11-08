@@ -12,9 +12,10 @@
 #include "name_generator.h"
 
 // Macros:
-#define INITIAL_NUM_STARFIGHTERS 10
 #define MAX_ENEMIES_DESTROYED_PER_RUN 4
+#define NUM_ALLIED_STARFIGHTERS 12
 #define NUM_ENEMY_STARFIGHTERS 100
+#define NUM_ENGINEER_THREADS 4
 #define NUM_PILOT_THREADS 10
 #define PILOT_DEATH_PROBABILITY 0.2
 
@@ -27,6 +28,12 @@ typedef enum {
 typedef struct {
   unsigned int id;
   char name[FULL_NAME_SIZE];
+  unsigned int next_break_duration;
+} engineer_args;
+
+typedef struct {
+  unsigned int id;
+  char name[FULL_NAME_SIZE];
 } pilot_args;
 
 // Global variables:
@@ -35,9 +42,10 @@ pthread_mutex_t mutex_enemy_starfighters = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_pilots = PTHREAD_MUTEX_INITIALIZER;
 sem_t sem_end_condition;
 sem_t sem_lose_condition;
+sem_t sem_starfighters_in_maintenance;
 sem_t sem_starfighters_ready_to_fly;
 sem_t sem_win_condition;
-unsigned int num_allied_starfighters = INITIAL_NUM_STARFIGHTERS;
+unsigned int num_allied_starfighters = NUM_ALLIED_STARFIGHTERS;
 unsigned int num_enemy_starfighters = NUM_ENEMY_STARFIGHTERS;
 unsigned int num_pilots = NUM_PILOT_THREADS;
 
@@ -48,7 +56,9 @@ void bury_pilot(pilot_args*);
 void check_end_condition(void);
 void decrease_enemy_starfighters(unsigned int);
 void fight_against_enemies(pilot_args*);
+void fix_starfighter(engineer_args*);
 void land_starfighter(pilot_args*);
+void take_a_break(engineer_args*);
 void take_off_on_starfigther(pilot_args*);
 void* engineer(void*);
 void* pilot(void*);
@@ -57,17 +67,60 @@ void* pilot(void*);
 int main(int argc, char const *argv[]) {
 
   // Variable declaration.
+  engineer_args engineer_thread_args[NUM_ENGINEER_THREADS];
   int i;
   pilot_args pilot_thread_args[NUM_PILOT_THREADS];
+  pthread_t engineer_thread_ids[NUM_ENGINEER_THREADS];
   pthread_t pilot_thread_ids[NUM_PILOT_THREADS];
+
+  // Run validations on macro values.
+  if(NUM_PILOT_THREADS <= 0) {
+    printf("Error! The number of pilots must be bigger than zero.\n");
+    exit(1);
+  }
+
+  else if(NUM_ALLIED_STARFIGHTERS <= 0) {
+    printf(
+      "Error! The number of allied starfighters must be bigger than zero.\n"
+    );
+    exit(2);
+  }
+
+  else if(NUM_ENEMY_STARFIGHTERS <= 0) {
+    printf(
+      "Error! The number of enemy starfighters must be bigger than zero.\n"
+    );
+    exit(3);
+  }
+
+  else if(MAX_ENEMIES_DESTROYED_PER_RUN <= 0) {
+    printf(
+      "Error! The number of enemies destroyed per "
+      "pilot run must be bigger than zero.\n"
+    );
+    exit(4);
+  }
+
+  else if(PILOT_DEATH_PROBABILITY < 0 || PILOT_DEATH_PROBABILITY > 1) {
+    printf(
+      "Error! The probability of pilot death must be in the interval [0,1].\n"
+    );
+    exit(5);
+  }
+
+  if(NUM_ENGINEER_THREADS <= 0) {
+    printf("Error! The number of engineers must be bigger than zero.\n");
+    exit(6);
+  }
 
   // Initialize random number generator.
   srand((unsigned int) time(NULL));
 
   // Initialize semaphores.
-  sem_init(&sem_starfighters_ready_to_fly, 0, INITIAL_NUM_STARFIGHTERS);
   sem_init(&sem_end_condition, 0, 0);
   sem_init(&sem_lose_condition, 0, 0);
+  sem_init(&sem_starfighters_in_maintenance, 0, 0);
+  sem_init(&sem_starfighters_ready_to_fly, 0, NUM_ALLIED_STARFIGHTERS);
   sem_init(&sem_win_condition, 0, 0);
 
   // Create pilot threads.
@@ -81,12 +134,40 @@ int main(int argc, char const *argv[]) {
     pthread_create(&pilot_thread_ids[i], NULL, pilot, &pilot_thread_args[i]);
 
     // Small desync to avoid similar pilot args.
-    usleep(500);
+    usleep(1000);
+
+  }
+
+  // Create engineer threads.
+  for(i = 0; i < NUM_ENGINEER_THREADS; i++) {
+
+    // Generate engineer thread args.
+    engineer_thread_args[i].id = i + 1;
+    generate_name((char *) &engineer_thread_args[i].name);
+    engineer_thread_args[i].next_break_duration = roll_dice_with_N_sides(6) + 2;
+
+    // Create thread.
+    pthread_create(
+      &engineer_thread_ids[i],
+      NULL,
+      engineer,
+      &engineer_thread_args[i]
+    );
+
+    // Small desync to avoid similar pilot args.
+    usleep(1000);
 
   }
 
   // Wait for the war to end.
   sem_wait(&sem_end_condition);
+
+  // Cancel all existing threads.
+  for(i = 0; i < NUM_PILOT_THREADS; i++)
+    pthread_cancel(pilot_thread_ids[i]);
+
+  for(i = 0; i < NUM_ENGINEER_THREADS; i++)
+    pthread_cancel(engineer_thread_ids[i]);
 
   // Check to see if the war was won.
   if(sem_trywait(&sem_win_condition) == 0) {
@@ -190,23 +271,55 @@ void fight_against_enemies(pilot_args *pilot_info) {
   decrease_enemy_starfighters(num_enemies_destroyed);
 
   printf(
-    "Pilot %s (#%u) destroyed %u enemies!\n",
+    "Pilot %s (#%u) destroyed %u enemies.\n",
     pilot_info->name, pilot_info->id, num_enemies_destroyed
   );
+
+}
+
+void fix_starfighter(engineer_args *engineer_info) {
+
+  // Fix a starfigther when one comes back from battle.
+  sem_wait(&sem_starfighters_in_maintenance);
+    printf(
+      "Engineer %s (#%u) is fixing a starfighter.\n",
+      engineer_info->name, engineer_info->id
+    );
+
+    sleep(roll_dice_with_N_sides(10) + 3);
+  sem_post(&sem_starfighters_ready_to_fly);
 
 }
 
 void land_starfighter(pilot_args *pilot_info) {
 
   printf(
-    "Pilot %s (#%u) returned from battle!\n", pilot_info->name, pilot_info->id
+    "Pilot %s (#%u) returned from battle.\n", pilot_info->name, pilot_info->id
   );
 
   // Check to see if the war ended.
   check_end_condition();
 
-  // Return the starfighter.
-  sem_post(&sem_starfighters_ready_to_fly);
+  // Send the starfighter to maintenance.
+  sem_post(&sem_starfighters_in_maintenance);
+
+}
+
+void take_a_break(engineer_args *engineer_info) {
+
+  // Variable declaration.
+  unsigned int current_break_duration = engineer_info->next_break_duration;
+
+  // Take a break from work and enjoy life a little.
+  printf(
+    "Engineer %s (#%u) is taking a break for %u hours.\n",
+    engineer_info->name, engineer_info->id, current_break_duration
+  );
+  sleep(current_break_duration);
+
+  // Update the next break time according to the length of the current break.
+  engineer_info->next_break_duration = \
+    roll_dice_with_N_sides(8 - current_break_duration) + 2;
 
 }
 
@@ -216,18 +329,35 @@ void take_off_on_starfigther(pilot_args *pilot_info) {
   sem_wait(&sem_starfighters_ready_to_fly);
 
   printf(
-    "Pilot %s (#%u) took off on a starfighter!\n",
+    "Pilot %s (#%u) took off on a starfighter.\n",
     pilot_info->name, pilot_info->id
   );
-  
+
 }
 
 
 void * engineer(void *args) {
 
-  // Placeholder.
+  // Variable declaration.
+  engineer_args engineer_information;
+
+  // Read engineer args.
+  engineer_information.id = ((engineer_args*) args)->id;
+  strcpy(
+    (char *) &engineer_information.name,
+    (char *) &(((engineer_args*) args)->name)
+  );
+  engineer_information.next_break_duration = \
+    ((engineer_args*) args)->next_break_duration;
+
+  printf(
+    "Engineer #%u: %s\n", engineer_information.id, engineer_information.name
+  );
+
+  // Main thread loop.
   while(TRUE) {
-    sleep(5);
+    fix_starfighter(&engineer_information);
+    take_a_break(&engineer_information);
   }
 
 }
@@ -238,6 +368,7 @@ void * pilot(void *args) {
   boolean pilot_died_on_this_run;
   pilot_args pilot_information;
 
+  // Read pilot args.
   pilot_information.id = ((pilot_args*) args)->id;
   strcpy(
     (char *) &pilot_information.name,
