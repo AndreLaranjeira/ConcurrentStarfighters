@@ -18,6 +18,7 @@
 #define NUM_ENGINEER_THREADS 4
 #define NUM_PILOT_THREADS 10
 #define PILOT_DEATH_PROBABILITY 0.2
+#define PILOT_TRAUMA_PROBABILITY 0.25
 
 // Enum declarations:
 typedef enum {
@@ -31,7 +32,8 @@ typedef enum {
   NUM_ENEMY_STARFIGHTERS_ERROR = 3,
   MAX_ENEMIES_DESTROYED_PER_RUN_ERROR = 4,
   PILOT_DEATH_PROBABILITY_ERROR = 5,
-  NUM_ENGINEER_THREADS_ERROR = 6
+  NUM_ENGINEER_THREADS_ERROR = 6,
+  PILOT_TRAUMA_PROBABILITY_ERROR = 7
 } error_code;
 
 // Struct declarations:
@@ -46,12 +48,19 @@ typedef struct {
   char name[FULL_NAME_SIZE];
 } pilot_args;
 
+typedef struct {
+  char name[FULL_NAME_SIZE];
+} psychiatrist_args;
+
 // Global variables:
 pthread_mutex_t mutex_allied_starfighters = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_enemy_starfighters = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_pilots = PTHREAD_MUTEX_INITIALIZER;
 sem_t sem_end_condition;
 sem_t sem_lose_condition;
+sem_t sem_psychiatrist_office;
+sem_t sem_psychiatrist_patient_ready;
+sem_t sem_psychiatrist_session_ended;
 sem_t sem_starfighters_in_maintenance;
 sem_t sem_starfighters_ready_to_fly;
 sem_t sem_win_condition;
@@ -64,15 +73,18 @@ boolean check_event_outcome_with_probability(double);
 unsigned int roll_dice_with_N_sides(unsigned int);
 void bury_pilot(pilot_args*);
 void check_end_condition(void);
+void conduct_psychiatry_session(psychiatrist_args*);
 void decrease_enemy_starfighters(unsigned int);
 void fight_against_enemies(pilot_args*);
 void fix_starfighter(engineer_args*);
 void land_starfighter(pilot_args*);
 void suit_up_for_takeoff(pilot_args*);
-void take_a_break(engineer_args*);
 void takeoff_on_starfigther(pilot_args*);
+void take_a_break(engineer_args*);
+void visit_psychiatrist_office(pilot_args*);
 void* engineer(void*);
 void* pilot(void*);
+void* psychiatrist(void*);
 
 // Main function:
 int main(int argc, char const *argv[]) {
@@ -83,6 +95,8 @@ int main(int argc, char const *argv[]) {
   pilot_args pilot_thread_args[NUM_PILOT_THREADS];
   pthread_t engineer_thread_ids[NUM_ENGINEER_THREADS];
   pthread_t pilot_thread_ids[NUM_PILOT_THREADS];
+  pthread_t psychiatrist_thread_id;
+  psychiatrist_args psychiatrist_thread_args;
 
   // Run validations on macro values.
   if(NUM_PILOT_THREADS <= 0) {
@@ -119,9 +133,16 @@ int main(int argc, char const *argv[]) {
     exit(PILOT_DEATH_PROBABILITY_ERROR);
   }
 
-  if(NUM_ENGINEER_THREADS <= 0) {
+  else if(NUM_ENGINEER_THREADS <= 0) {
     printf("Error! The number of engineers must be bigger than zero.\n");
     exit(NUM_ENGINEER_THREADS_ERROR);
+  }
+
+  else if(PILOT_TRAUMA_PROBABILITY < 0 || PILOT_TRAUMA_PROBABILITY > 1) {
+    printf(
+      "Error! The probability of pilot trauma must be in the interval [0,1].\n"
+    );
+    exit(PILOT_TRAUMA_PROBABILITY_ERROR);
   }
 
   // Initialize random number generator.
@@ -130,11 +151,16 @@ int main(int argc, char const *argv[]) {
   // Initialize semaphores.
   sem_init(&sem_end_condition, 0, 0);
   sem_init(&sem_lose_condition, 0, 0);
+  sem_init(&sem_psychiatrist_office, 0, 1);
+  sem_init(&sem_psychiatrist_patient_ready, 0, 0);
+  sem_init(&sem_psychiatrist_session_ended, 0, 0);
   sem_init(&sem_starfighters_in_maintenance, 0, 0);
   sem_init(&sem_starfighters_ready_to_fly, 0, NUM_ALLIED_STARFIGHTERS);
   sem_init(&sem_win_condition, 0, 0);
 
   // Create pilot threads.
+  printf("\nPilots:\n");
+
   for(i = 0; i < NUM_PILOT_THREADS; i++) {
 
     // Generate pilot thread args.
@@ -144,12 +170,16 @@ int main(int argc, char const *argv[]) {
     // Create thread.
     pthread_create(&pilot_thread_ids[i], NULL, pilot, &pilot_thread_args[i]);
 
-    // Small desync to avoid similar pilot args.
-    usleep(2000);
+    printf(
+      "Pilot %s (#%u) created.\n",
+      pilot_thread_args[i].name, pilot_thread_args[i].id
+    );
 
   }
 
   // Create engineer threads.
+  printf("\nEngineers:\n");
+
   for(i = 0; i < NUM_ENGINEER_THREADS; i++) {
 
     // Generate engineer thread args.
@@ -165,12 +195,26 @@ int main(int argc, char const *argv[]) {
       &engineer_thread_args[i]
     );
 
-    // Small desync to avoid similar pilot args.
-    usleep(2000);
+    printf(
+      "Engineer %s (#%u) created.\n",
+      engineer_thread_args[i].name, engineer_thread_args[i].id
+    );
 
   }
 
+  // Create psychiatrist thread.
+  printf("\nPsychiatrist:\n");
+  generate_name((char *) &psychiatrist_thread_args.name);
+  pthread_create(
+    &psychiatrist_thread_id,
+    NULL,
+    psychiatrist,
+    &psychiatrist_thread_args
+  );
+  printf("Psychiatrist %s created!\n", psychiatrist_thread_args.name);
+
   // Wait for the war to end.
+  printf("\nWar begun:\n");
   sem_wait(&sem_end_condition);
 
   // Cancel all existing threads.
@@ -180,7 +224,9 @@ int main(int argc, char const *argv[]) {
   for(i = 0; i < NUM_ENGINEER_THREADS; i++)
     pthread_cancel(engineer_thread_ids[i]);
 
-  // Check to see if the war was won.
+  pthread_cancel(psychiatrist_thread_id);
+
+  // Check to see if the war was won or lost.
   if(sem_trywait(&sem_win_condition) == 0) {
     pthread_mutex_lock(&mutex_pilots);
       printf(
@@ -192,7 +238,6 @@ int main(int argc, char const *argv[]) {
   else if(sem_trywait(&sem_lose_condition) == 0)
     printf("The war was LOST!\n");
 
-  // Finish execution.
   return 0;
 
 }
@@ -258,6 +303,23 @@ void check_end_condition(void) {
   if(lose_condition || win_condition)
     sem_post(&sem_end_condition);
 
+}
+
+void conduct_psychiatry_session(psychiatrist_args *psychiatrist_info) {
+
+  // Wait for a patient to come in and be ready.
+  sem_wait(&sem_psychiatrist_patient_ready);
+
+  printf(
+    "Psychiatrist %s started a new psychiatry session.\n",
+    psychiatrist_info->name
+  );
+
+  // Psychiatry sessions take time.
+  sleep(roll_dice_with_N_sides(10) + 4);
+
+  // Tell the pacient the session ended.
+  sem_post(&sem_psychiatrist_session_ended);
 }
 
 void decrease_enemy_starfighters(unsigned int num_enemies_destroyed) {
@@ -355,6 +417,29 @@ void takeoff_on_starfigther(pilot_args *pilot_info) {
 
 }
 
+void visit_psychiatrist_office(pilot_args *pilot_info) {
+  printf(
+    "Pilot %s (#%u) went to see the psychiatrist.\n",
+    pilot_info->name, pilot_info->id
+  );
+
+  // Wait for the office to be available for use.
+  sem_wait(&sem_psychiatrist_office);
+
+  // Call the psychiatrist.
+  sem_post(&sem_psychiatrist_patient_ready);
+
+  // Wait for the session to end.
+  sem_wait(&sem_psychiatrist_session_ended);
+
+  // Leave the psychiatrist office.
+  sem_post(&sem_psychiatrist_office);
+
+  printf(
+    "Pilot %s (#%u) left the psychiatrist's office.\n",
+    pilot_info->name, pilot_info->id
+  );
+}
 
 void * engineer(void *args) {
 
@@ -370,10 +455,6 @@ void * engineer(void *args) {
   engineer_information.next_break_duration = \
     ((engineer_args*) args)->next_break_duration;
 
-  printf(
-    "Engineer #%u: %s\n", engineer_information.id, engineer_information.name
-  );
-
   // Main thread loop.
   while(TRUE) {
     fix_starfighter(&engineer_information);
@@ -385,7 +466,7 @@ void * engineer(void *args) {
 void * pilot(void *args) {
 
   // Variable declaration.
-  boolean pilot_died_on_this_run;
+  boolean pilot_died_on_this_run, pilot_experienced_trauma_on_this_run;
   pilot_args pilot_information;
 
   // Read pilot args.
@@ -394,8 +475,6 @@ void * pilot(void *args) {
     (char *) &pilot_information.name,
     (char *) &(((pilot_args*) args)->name)
   );
-
-  printf("Pilot #%u: %s\n", pilot_information.id, pilot_information.name);
 
   // Main thread loop.
   while(TRUE) {
@@ -412,9 +491,33 @@ void * pilot(void *args) {
       pthread_exit((void*) 1);
     }
 
-    else
+    else {
       land_starfighter(&pilot_information);
 
+      pilot_experienced_trauma_on_this_run = \
+        check_event_outcome_with_probability(PILOT_TRAUMA_PROBABILITY);
+
+      if(pilot_experienced_trauma_on_this_run)
+        visit_psychiatrist_office(&pilot_information);
+    }
+
   }
+
+}
+
+void* psychiatrist(void *args) {
+
+  // Variable declaration.
+  psychiatrist_args psychiatrist_information;
+
+  // Read psychiatrist args.
+  strcpy(
+    (char *) &psychiatrist_information.name,
+    (char *) &(((psychiatrist_args*) args)->name)
+  );
+
+  // Main thread loop.
+  while(TRUE)
+    conduct_psychiatry_session(&psychiatrist_information);
 
 }
