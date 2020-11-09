@@ -10,9 +10,9 @@
 #include <string.h>
 
 // Macros:
-#define FIRST_NAME_ARRAY_SIZE 30
+#define FIRST_NAME_ARRAY_SIZE 40
 #define FULL_NAME_SIZE (NAME_SIZE)*3+3
-#define LAST_NAME_ARRAY_SIZE 30
+#define LAST_NAME_ARRAY_SIZE 40
 #define MIDDLE_NAME_ARRAY_SIZE 26
 #define NAME_SIZE 15
 
