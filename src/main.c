@@ -79,7 +79,7 @@ void fight_against_enemies(pilot_args*);
 void fix_starfighter(engineer_args*);
 void land_starfighter(pilot_args*);
 void suit_up_for_takeoff(pilot_args*);
-void takeoff_on_starfigther(pilot_args*);
+void takeoff_on_starfighter(pilot_args*);
 void take_a_break(engineer_args*);
 void visit_psychiatrist_office(pilot_args*);
 void* engineer(void*);
@@ -318,7 +318,7 @@ void conduct_psychiatry_session(psychiatrist_args *psychiatrist_info) {
   // Psychiatry sessions take time.
   sleep(roll_dice_with_N_sides(10) + 4);
 
-  // Tell the pacient the session ended.
+  // Tell the patient the session ended.
   sem_post(&sem_psychiatrist_session_ended);
 }
 
@@ -343,16 +343,17 @@ void fight_against_enemies(pilot_args *pilot_info) {
   num_enemies_destroyed = roll_dice_with_N_sides(MAX_ENEMIES_DESTROYED_PER_RUN);
   decrease_enemy_starfighters(num_enemies_destroyed);
 
-  printf(
-    "Pilot %s (#%u) destroyed %u enemies.\n",
-    pilot_info->name, pilot_info->id, num_enemies_destroyed
-  );
+  printf("Pilot %s (#%u) destroyed ", pilot_info->name, pilot_info->id);
 
+  if(num_enemies_destroyed == 1)
+      printf("1 enemy.\n");
+  else
+      printf("%u enemies.\n", num_enemies_destroyed);
 }
 
 void fix_starfighter(engineer_args *engineer_info) {
 
-  // Fix a starfigther when one comes back from battle.
+  // Fix a starfighter when one comes back from battle.
   sem_wait(&sem_starfighters_in_maintenance);
     printf(
       "Engineer %s (#%u) is fixing a starfighter.\n",
@@ -405,7 +406,7 @@ void take_a_break(engineer_args *engineer_info) {
 
 }
 
-void takeoff_on_starfigther(pilot_args *pilot_info) {
+void takeoff_on_starfighter(pilot_args *pilot_info) {
 
   // Acquire a starfighter.
   sem_wait(&sem_starfighters_ready_to_fly);
@@ -480,7 +481,7 @@ void * pilot(void *args) {
   while(TRUE) {
 
     suit_up_for_takeoff(&pilot_information);
-    takeoff_on_starfigther(&pilot_information);
+    takeoff_on_starfighter(&pilot_information);
     fight_against_enemies(&pilot_information);
 
     pilot_died_on_this_run = \
